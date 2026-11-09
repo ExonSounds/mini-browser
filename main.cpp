@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include "vblank.h"
+
 namespace {
 
 // The HTML-only DuckDuckGo works without JavaScript.
@@ -343,6 +345,35 @@ void set_gpu_enabled(Browser *b, bool enabled) {
         webkit_web_view_get_settings(b->view),
         enabled ? WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS
                 : WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
+}
+
+// Render at the monitor's full refresh rate. WebKit otherwise prefers ~60 fps
+// even on faster displays.
+void use_full_refresh_rate(WebKitSettings *settings) {
+    WebKitFeatureList *features = webkit_settings_get_all_features();
+    for (gsize i = 0; i < webkit_feature_list_get_length(features); ++i) {
+        WebKitFeature *f = webkit_feature_list_get(features, i);
+        if (g_str_equal(webkit_feature_get_identifier(f),
+                        "PreferPageRenderingUpdatesNear60FPS")) {
+            webkit_settings_set_feature_enabled(settings, f, FALSE);
+        }
+    }
+    webkit_feature_list_unref(features);
+}
+
+// After each window frame, pass GTK's (compositor-reported) presentation
+// timing to the refresh pacer so WebKit's ticks line up with real refreshes.
+void on_after_paint(GdkFrameClock *clock, gpointer) {
+    gint64 interval = 0, presentation = 0;
+    gdk_frame_clock_get_refresh_info(clock, gdk_frame_clock_get_frame_time(clock),
+                                     &interval, &presentation);
+    vblank_set_phase_hint(presentation);
+}
+
+void on_window_realize(GtkWidget *window, gpointer) {
+    if (GdkFrameClock *clock = gtk_widget_get_frame_clock(window)) {
+        g_signal_connect(clock, "after-paint", G_CALLBACK(on_after_paint), nullptr);
+    }
 }
 
 void on_gpu_toggled(GtkSwitch *sw, GParamSpec *, gpointer data) {
@@ -914,6 +945,7 @@ void on_activate(GtkApplication *app, gpointer) {
     gtk_widget_set_hexpand(GTK_WIDGET(b->view), TRUE);
     apply_script_settings(b, nullptr);  // scripts start off
     set_gpu_enabled(b, false);          // so does GPU rendering
+    use_full_refresh_rate(webkit_web_view_get_settings(b->view));
     if (!audio_output_available()) {
         // Without an audio output, media would crash the page; turn it off.
         b->media_disabled = true;
@@ -946,6 +978,7 @@ void on_activate(GtkApplication *app, gpointer) {
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(b->view));
     gtk_window_set_child(GTK_WINDOW(window), box);
 
+    g_signal_connect(window, "realize", G_CALLBACK(on_window_realize), nullptr);
     g_signal_connect(b->entry, "activate", G_CALLBACK(on_entry_activate), b);
     g_signal_connect(b->view, "notify::uri", G_CALLBACK(on_uri_changed), b);
     g_signal_connect(b->view, "notify::title", G_CALLBACK(on_title_changed), window);
@@ -961,6 +994,12 @@ void on_activate(GtkApplication *app, gpointer) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    // GTK's GL renderer keeps WebKit at the full refresh rate. With the
+    // default Vulkan renderer each frame takes an extra refresh to hand back,
+    // which halves the frame rate while scrolling (90 instead of 180 fps on a
+    // 180 Hz screen). A GSK_RENDERER set by the user still wins.
+    g_setenv("GSK_RENDERER", "gl", FALSE);
+
     GtkApplication *app =
         gtk_application_new("org.example.MiniBrowser", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), nullptr);

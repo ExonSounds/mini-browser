@@ -25,6 +25,19 @@ from the ☰ menu at the top right, and every switch there starts off.
   `~/.config/mini-browser/blocked-script-domains`.
 - **Hardware acceleration (GPU)** switch, off by default because GPU rendering
   crashes on some driver setups.
+- **Full refresh rate.** Pages render at the monitor's refresh rate (e.g.
+  180 fps on a 180 Hz screen) instead of WebKit's usual ~60:
+  - WebKit times frames with the DRM driver's vblank wait. Drivers that don't
+    support it (NVIDIA's) leave WebKit on a fixed 60 fps timer, so
+    `vblank.cpp` supplies its own `drmWaitVBlank()`. It uses the real call
+    when it works, and otherwise ticks at the display mode's exact refresh
+    rate, lined up with the compositor's presentation times.
+  - WebKit's "prefer ~60 fps" option is turned off.
+  - GTK's GL renderer is used (`GSK_RENDERER=gl`, unless you set it
+    yourself); with the Vulkan renderer, scrolling ran at half rate.
+
+  Smoothest with **Hardware acceleration (GPU)** on. Fast scrolling on
+  text-heavy pages can still drop frames while new text is being drawn.
 - **Crash protection.** If GStreamer has no audio output (`gst-plugins-good`
   missing), audio and video are turned off so pages can't crash the browser,
   and the menu says so. If a page process dies anyway, a short message is
@@ -46,6 +59,7 @@ For audio and video, also install `gst-plugins-base gst-plugins-good gst-libav`.
 
 ## Files
 
-- `main.cpp`: the whole browser.
+- `main.cpp`: the browser.
+- `vblank.cpp`, `vblank.h`: refresh-rate pacing for WebKit (see above).
 - `Makefile`: builds `browser` with `pkg-config`
-  (`gtk4 webkitgtk-6.0 libsoup-3.0 gstreamer-1.0`).
+  (`gtk4 webkitgtk-6.0 libsoup-3.0 gstreamer-1.0 libdrm`).
