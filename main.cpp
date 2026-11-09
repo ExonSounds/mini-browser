@@ -2,10 +2,10 @@
 // Built on GTK4 + WebKitGTK 6.0.
 //
 // By default pages are rendered from HTML and CSS only: JavaScript is off.
-// The menu button at the top right holds toggles (all off by default) that
-// turn extra features back on, the sites the current page loads scripts
-// from, and a list of addresses whose scripts stay blocked even when
-// scripts are allowed.
+// The menu button at the top right holds toggles that turn extra features
+// on (all off by default except GPU rendering), the sites the current page
+// loads scripts from, and a list of addresses whose scripts stay blocked
+// even when scripts are allowed.
 
 #include <gst/gst.h>
 #include <gtk/gtk.h>
@@ -28,6 +28,9 @@ namespace {
 const char *kHomePage = "https://html.duckduckgo.com/html/";
 const char *kSearchUrl = "https://html.duckduckgo.com/html/?q=";
 const char *kAppDir = "mini-browser";
+// GPU rendering is the one switch that starts on: without it, pages can't
+// keep up with high refresh rates.
+const bool kGpuOnByDefault = true;
 const char *kBlocklistFile = "blocked-script-domains";
 
 struct Browser {
@@ -780,16 +783,17 @@ void on_block_entry_changed(GtkEditable *editable, gpointer) {
     gtk_widget_remove_css_class(GTK_WIDGET(editable), "error");
 }
 
-// One "label ........ [switch]" row in the menu. Switches start off.
+// One "label ........ [switch]" row in the menu. Switches start off unless
+// initially_on is set (the start state must match the browser's settings).
 void add_toggle(GtkWidget *list, const char *label, GCallback on_toggled,
-                Browser *browser) {
+                Browser *browser, bool initially_on = false) {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     GtkWidget *text = gtk_label_new(label);
     gtk_widget_set_hexpand(text, TRUE);
     gtk_label_set_xalign(GTK_LABEL(text), 0.0f);
 
     GtkWidget *sw = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(sw), FALSE);
+    gtk_switch_set_active(GTK_SWITCH(sw), initially_on);  // before connecting
     gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
     g_signal_connect(sw, "notify::active", on_toggled, browser);
 
@@ -892,8 +896,10 @@ GtkWidget *build_menu_button(Browser *b) {
     gtk_box_append(GTK_BOX(list), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(list), build_block_section(b));
     gtk_box_append(GTK_BOX(list), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-    // Off by default: GPU rendering crashes on some driver setups.
-    add_toggle(list, "Hardware acceleration (GPU)", G_CALLBACK(on_gpu_toggled), b);
+    // On by default: needed for full-refresh-rate rendering. Can be turned
+    // off if a graphics driver crashes with it.
+    add_toggle(list, "Hardware acceleration (GPU)", G_CALLBACK(on_gpu_toggled), b,
+               kGpuOnByDefault);
     if (b->media_disabled) {
         GtkWidget *note = gtk_label_new(
             "Audio and video are off: GStreamer has no audio output. Install "
@@ -944,7 +950,7 @@ void on_activate(GtkApplication *app, gpointer) {
     gtk_widget_set_vexpand(GTK_WIDGET(b->view), TRUE);
     gtk_widget_set_hexpand(GTK_WIDGET(b->view), TRUE);
     apply_script_settings(b, nullptr);  // scripts start off
-    set_gpu_enabled(b, false);          // so does GPU rendering
+    set_gpu_enabled(b, kGpuOnByDefault);
     use_full_refresh_rate(webkit_web_view_get_settings(b->view));
     if (!audio_output_available()) {
         // Without an audio output, media would crash the page; turn it off.

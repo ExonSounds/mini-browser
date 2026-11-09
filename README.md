@@ -4,7 +4,9 @@ A minimal web browser in C++: one address/search bar on top, the page below.
 Built on GTK 4 and WebKitGTK 6.0.
 
 Pages are shown as **HTML and CSS only** by default. Everything else is opt-in
-from the ☰ menu at the top right, and every switch there starts off.
+from the ☰ menu at the top right. Every switch there starts off except
+hardware acceleration, which is on so pages can render at the full refresh
+rate.
 
 ## Features
 
@@ -23,8 +25,9 @@ from the ☰ menu at the top right, and every switch there starts off.
   WebKit's content blocker; if the page itself is on a blocked site, all its
   scripts are off. The list is saved to
   `~/.config/mini-browser/blocked-script-domains`.
-- **Hardware acceleration (GPU)** switch, off by default because GPU rendering
-  crashes on some driver setups.
+- **Hardware acceleration (GPU)** switch, on by default. Turn it off if your
+  graphics driver crashes with it (the page then shows a "This page crashed"
+  message). It's reset to on at every start.
 - **Full refresh rate.** Pages render at the monitor's refresh rate (e.g.
   180 fps on a 180 Hz screen) instead of WebKit's usual ~60:
   - WebKit times frames with the DRM driver's vblank wait. Drivers that don't
@@ -36,8 +39,9 @@ from the ☰ menu at the top right, and every switch there starts off.
   - GTK's GL renderer is used (`GSK_RENDERER=gl`, unless you set it
     yourself); with the Vulkan renderer, scrolling ran at half rate.
 
-  Smoothest with **Hardware acceleration (GPU)** on. Fast scrolling on
-  text-heavy pages can still drop frames while new text is being drawn.
+  Needs **Hardware acceleration (GPU)** on; without it the CPU can't draw
+  frames fast enough. Fast scrolling on text-heavy pages can still drop
+  frames while new text is being drawn.
 - **Crash protection.** If GStreamer has no audio output (`gst-plugins-good`
   missing), audio and video are turned off so pages can't crash the browser,
   and the menu says so. If a page process dies anyway, a short message is
