@@ -24,9 +24,7 @@ from the ☰ menu at the top right, and every switch there starts off.
   scripts are off. The list is saved to
   `~/.config/mini-browser/blocked-script-domains`.
 - **Hardware acceleration (GPU)** switch, off by default because GPU rendering
-  crashes on some driver setups. For example, Mesa's nouveau driver crashed
-  WebKit on an RTX 3060 Ti on heavy pages (`u_blitter: Caught recursion`);
-  the same pages ran fine with NVIDIA's own driver.
+  crashes on some driver setups.
 - **Crash protection.** If GStreamer has no audio output (`gst-plugins-good`
   missing), audio and video are turned off so pages can't crash the browser,
   and the menu says so. If a page process dies anyway, a short message is
