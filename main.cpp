@@ -35,6 +35,8 @@ const char *kBlocklistFile = "blocked-script-domains";
 
 struct Browser {
     GtkWidget *entry = nullptr;
+    GtkWidget *back_button = nullptr;
+    GtkWidget *forward_button = nullptr;
     WebKitWebView *view = nullptr;
 
     bool scripts_on = false;
@@ -713,8 +715,96 @@ void refresh_page_scripts(Browser *b) {
     }
 }
 
+// ------------------------------------------------------ back / forward ----
+
+// Grey out a button when there's nowhere to go in that direction.
+void update_nav_buttons(Browser *b) {
+    gtk_widget_set_sensitive(b->back_button, webkit_web_view_can_go_back(b->view));
+    gtk_widget_set_sensitive(b->forward_button,
+                             webkit_web_view_can_go_forward(b->view));
+}
+
+void go_back(Browser *b) {
+    if (webkit_web_view_can_go_back(b->view)) webkit_web_view_go_back(b->view);
+}
+
+void go_forward(Browser *b) {
+    if (webkit_web_view_can_go_forward(b->view)) webkit_web_view_go_forward(b->view);
+}
+
+void on_back_clicked(GtkButton *, gpointer data) { go_back(static_cast<Browser *>(data)); }
+
+void on_forward_clicked(GtkButton *, gpointer data) {
+    go_forward(static_cast<Browser *>(data));
+}
+
+void on_history_changed(WebKitBackForwardList *, WebKitBackForwardListItem *,
+                        gpointer, gpointer data) {
+    update_nav_buttons(static_cast<Browser *>(data));
+}
+
+// The back/forward side buttons on a mouse (buttons 8 and 9).
+void on_mouse_nav_pressed(GtkGestureClick *gesture, int, double, double, gpointer data) {
+    auto *b = static_cast<Browser *>(data);
+    guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    if (button == 8) go_back(b);
+    else if (button == 9) go_forward(b);
+    else return;
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+
+GtkWidget *nav_button(const char *icon, const char *tooltip, GCallback on_click,
+                      Browser *b) {
+    GtkWidget *button = gtk_button_new_from_icon_name(icon);
+    gtk_widget_set_tooltip_text(button, tooltip);
+    gtk_widget_set_sensitive(button, FALSE);  // nothing to go to yet
+    g_signal_connect(button, "clicked", on_click, b);
+    return button;
+}
+
+// Alt+Left / Alt+Right, and the mouse's side buttons.
+void add_nav_shortcuts(GtkWidget *window, Browser *b) {
+    GtkEventController *keys = gtk_shortcut_controller_new();
+    // Run before the page or address bar sees the keys.
+    gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
+    struct {
+        const char *trigger;
+        void (*action)(Browser *);
+    } shortcuts[] = {{"<Alt>Left", go_back}, {"<Alt>Right", go_forward}};
+    for (const auto &s : shortcuts) {
+        auto action = s.action;
+        GtkShortcutAction *callback = gtk_callback_action_new(
+            [](GtkWidget *, GVariant *, gpointer data) -> gboolean {
+                auto *pair = static_cast<std::pair<void (*)(Browser *), Browser *> *>(data);
+                pair->first(pair->second);
+                return TRUE;
+            },
+            new std::pair<void (*)(Browser *), Browser *>(action, b),
+            [](gpointer data) {
+                delete static_cast<std::pair<void (*)(Browser *), Browser *> *>(data);
+            });
+        gtk_shortcut_controller_add_shortcut(
+            GTK_SHORTCUT_CONTROLLER(keys),
+            gtk_shortcut_new(gtk_shortcut_trigger_parse_string(s.trigger), callback));
+    }
+    gtk_widget_add_controller(window, keys);
+
+    GtkGesture *mouse = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(mouse), 0);  // any button
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(mouse),
+                                               GTK_PHASE_CAPTURE);
+    g_signal_connect(mouse, "pressed", G_CALLBACK(on_mouse_nav_pressed), b);
+    gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(mouse));
+}
+
 void on_load_changed(WebKitWebView *, WebKitLoadEvent event, gpointer data) {
     auto *b = static_cast<Browser *>(data);
+    if (event == WEBKIT_LOAD_COMMITTED) {
+        // A page restored from the back/forward cache skips the response
+        // check, so make sure its script settings match its address.
+        apply_script_settings(b, webkit_web_view_get_uri(b->view));
+        update_nav_buttons(b);
+    }
     if (event == WEBKIT_LOAD_REDIRECTED) return;
     // FINISHED also follows a failed load, so the view is showing something.
     b->page_committed = event != WEBKIT_LOAD_STARTED;
@@ -965,17 +1055,29 @@ void on_activate(GtkApplication *app, gpointer) {
     load_blocklist(b);
     update_filter(b);
 
-    // Top bar: search entry filling the width, menu button on the right.
+    // Top bar: back and forward on the left, search entry filling the width,
+    // menu button on the right.
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_margin_start(bar, 6);
     gtk_widget_set_margin_end(bar, 6);
     gtk_widget_set_margin_top(bar, 6);
     gtk_widget_set_margin_bottom(bar, 6);
 
+    b->back_button = nav_button("go-previous-symbolic", "Back (Alt+Left)",
+                                G_CALLBACK(on_back_clicked), b);
+    b->forward_button = nav_button("go-next-symbolic", "Forward (Alt+Right)",
+                                   G_CALLBACK(on_forward_clicked), b);
+    // Join the two buttons into one segmented control.
+    GtkWidget *nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(nav, "linked");
+    gtk_box_append(GTK_BOX(nav), b->back_button);
+    gtk_box_append(GTK_BOX(nav), b->forward_button);
+
     b->entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(b->entry), "Search or enter address");
     gtk_widget_set_hexpand(b->entry, TRUE);
 
+    gtk_box_append(GTK_BOX(bar), nav);
     gtk_box_append(GTK_BOX(bar), b->entry);
     gtk_box_append(GTK_BOX(bar), build_menu_button(b));
 
@@ -985,6 +1087,9 @@ void on_activate(GtkApplication *app, gpointer) {
     gtk_window_set_child(GTK_WINDOW(window), box);
 
     g_signal_connect(window, "realize", G_CALLBACK(on_window_realize), nullptr);
+    add_nav_shortcuts(window, b);
+    g_signal_connect(webkit_web_view_get_back_forward_list(b->view), "changed",
+                     G_CALLBACK(on_history_changed), b);
     g_signal_connect(b->entry, "activate", G_CALLBACK(on_entry_activate), b);
     g_signal_connect(b->view, "notify::uri", G_CALLBACK(on_uri_changed), b);
     g_signal_connect(b->view, "notify::title", G_CALLBACK(on_title_changed), window);

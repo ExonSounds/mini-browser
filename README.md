@@ -1,6 +1,7 @@
 # mini-browser
 
-A minimal web browser in C++: one address/search bar on top, the page below.
+A minimal web browser in C++: back/forward buttons and one address/search bar
+on top, the page below.
 Built on GTK 4 and WebKitGTK 6.0.
 
 Pages are shown as **HTML and CSS only** by default. Everything else is opt-in
@@ -13,6 +14,9 @@ rate.
 - **Search or address bar.** Text that looks like an address (`example.com`,
   `https://…`) opens directly; anything else is searched on DuckDuckGo's
   script-free HTML version.
+- **Back and forward** buttons to the left of the bar, greyed out when there's
+  nowhere to go. Also **Alt+Left** / **Alt+Right** and the mouse's side
+  buttons.
 - **Scripts off by default.** `<script>` tags, `on…` handler attributes and
   `javascript:` links are dropped while the page is parsed.
 - **Allow scripts (JavaScript)** switch. Flipping it reloads the page.
